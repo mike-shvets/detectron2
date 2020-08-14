@@ -531,7 +531,7 @@ def apply_transform_gens(transform_gens, img):
     for g in transform_gens:
         tfm = g.get_transform(img) if isinstance(g, TransformGen) else g
         assert isinstance(
-            tfm, Transform
+            tfm, (Transform, TransformList)
         ), "TransformGen {} must return an instance of Transform! Got {} instead".format(g, tfm)
         img = tfm.apply_image(img)
         tfms.append(tfm)
