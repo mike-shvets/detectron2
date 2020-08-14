@@ -491,22 +491,64 @@ def _evaluate_predictions_on_coco(coco_gt, coco_results, iou_type, kpt_oks_sigma
             c.pop("bbox", None)
 
     coco_dt = coco_gt.loadRes(coco_results)
-    coco_eval = COCOeval(coco_gt, coco_dt, iou_type)
-    # Use the COCO default keypoint OKS sigmas unless overrides are specified
-    if kpt_oks_sigmas:
-        coco_eval.params.kpt_oks_sigmas = np.array(kpt_oks_sigmas)
 
-    if iou_type == "keypoints":
-        num_keypoints = len(coco_results[0]["keypoints"]) // 3
-        assert len(coco_eval.params.kpt_oks_sigmas) == num_keypoints, (
-            "[COCOEvaluator] The length of cfg.TEST.KEYPOINT_OKS_SIGMAS (default: 17) "
-            "must be equal to the number of keypoints. However the prediction has {} "
-            "keypoints! For more information please refer to "
-            "http://cocodataset.org/#keypoints-eval.".format(num_keypoints)
-        )
+    def filter_anno(coco, x0, x1, y0, y1):
+        coco = copy.deepcopy(coco)
 
-    coco_eval.evaluate()
-    coco_eval.accumulate()
-    coco_eval.summarize()
+        filtered_anns = []
+        for ann in coco.dataset['annotations']:
+            image_id = ann['image_id']
+            bbox = ann['bbox']
+            h = coco.imgs[image_id]['height']
+            w = coco.imgs[image_id]['width']
+
+            # cx = (bbox[0] + bbox[2]) / (2 * w)
+            # cy = (bbox[1] + bbox[3]) / (2 * h)
+            cx = bbox[0] / w
+            cy = bbox[1] / h
+
+            if (cx >= x0) & (cx <= x1) & (cy >= y0) & (cy <= y1):
+                filtered_anns.append(ann)
+
+        print("Filtered {} / {} annotations".format(len(coco.dataset['annotations']), len(filtered_anns)))
+        coco.dataset['annotations'] = filtered_anns
+        coco.createIndex()
+
+        return coco
+
+    coco_dt_ori = coco_dt
+    coco_gt_ori = coco_gt
+
+    def run_bin(x0, x1, y0, y1):
+        coco_dt = filter_anno(coco_dt_ori, x0, x1, y0, y1)
+        coco_gt = filter_anno(coco_gt_ori, x0, x1, y0, y1)
+
+        coco_eval = COCOeval(coco_gt, coco_dt, iou_type)
+        # Use the COCO default keypoint OKS sigmas unless overrides are specified
+        if kpt_oks_sigmas:
+            coco_eval.params.kpt_oks_sigmas = np.array(kpt_oks_sigmas)
+
+        if iou_type == "keypoints":
+            num_keypoints = len(coco_results[0]["keypoints"]) // 3
+            assert len(coco_eval.params.kpt_oks_sigmas) == num_keypoints, (
+                "[COCOEvaluator] The length of cfg.TEST.KEYPOINT_OKS_SIGMAS (default: 17) "
+                "must be equal to the number of keypoints. However the prediction has {} "
+                "keypoints! For more information please refer to "
+                "http://cocodataset.org/#keypoints-eval.".format(num_keypoints)
+            )
+
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
+        return coco_eval
+
+    # delta = 0.2
+    # for x0 in np.arange(0, 1, delta):
+    #     x1 = x0 + delta
+    #     for y0 in np.arange(0, 1, delta):
+    #         print("=============== Processing for x0={} y0={} ================== ".format(x0, y0))
+    #         y1 = y0 + delta
+    #         coco_eval = run_bin(x0, x1, y0, y1)
+    coco_eval = run_bin(0.0, 1.0, 0.0, 1.0)
 
     return coco_eval
