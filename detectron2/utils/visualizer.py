@@ -327,7 +327,7 @@ class Visualizer:
         )
         self._instance_mode = instance_mode
 
-    def draw_instance_predictions(self, predictions):
+    def draw_instance_predictions(self, predictions, force_colors=None):
         """
         Draw instance-level prediction results on an image.
 
@@ -359,6 +359,9 @@ class Visualizer:
         else:
             colors = None
             alpha = 0.5
+
+        if force_colors is not None:
+            colors = force_colors
 
         if self._instance_mode == ColorMode.IMAGE_BW:
             self.output.img = self._create_grayscale_image(
