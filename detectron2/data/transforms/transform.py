@@ -183,7 +183,10 @@ class RotationTransform(Transform):
         coords = np.asarray(coords, dtype=float)
         if len(coords) == 0 or self.angle % 360 == 0:
             return coords
-        return cv2.transform(coords[:, np.newaxis, :], self.rm_coords)[:, 0, :]
+        coords = cv2.transform(coords[:, np.newaxis, :], self.rm_coords)[:, 0, :]
+        # Guard for valid polygons.
+        coords = np.round(coords, decimals=6)
+        return coords
 
     def apply_segmentation(self, segmentation):
         segmentation = self.apply_image(segmentation, interp=cv2.INTER_NEAREST)
