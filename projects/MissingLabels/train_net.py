@@ -30,6 +30,10 @@ from detectron2.data import get_detection_dataset_dicts
 from detectron2.data.samplers import TrainingSampler, RepeatFactorTrainingSampler
 from detectron2.data import print_instances_class_histogram
 
+from detectron2.data import DatasetCatalog, MetadataCatalog
+from detectron2.data.datasets import load_coco_json, register_coco_instances
+from detectron2.data.datasets.builtin_meta import _get_builtin_metadata
+
 
 class Trainer(DefaultTrainer):
     """
@@ -104,83 +108,34 @@ class Trainer(DefaultTrainer):
         res = OrderedDict({k + "_TTA": v for k, v in res.items()})
         return res
 
-    @classmethod
-    def build_train_loader(cls, cfg):
-        explicit_args = _train_loader_from_config(cfg)
-        return build_detection_train_loader(**explicit_args)
 
+def register_missing_labels_datasets():
+    root = os.getenv("DETECTRON2_DATASETS", "datasets")
 
-def _train_loader_from_config(cfg):
-    # modified from detectron2.data.build
-    dataset = get_detection_dataset_dicts(
-        cfg.DATASETS.TRAIN,
-        filter_empty=cfg.DATALOADER.FILTER_EMPTY_ANNOTATIONS,
-        min_keypoints=cfg.MODEL.ROI_KEYPOINT_HEAD.MIN_KEYPOINTS_PER_IMAGE
-        if cfg.MODEL.KEYPOINT_ON
-        else 0,
-        proposal_files=cfg.DATASETS.PROPOSAL_FILES_TRAIN if cfg.MODEL.LOAD_PROPOSALS else None,
-    )
+    image_root = "coco/train2017"
+    image_root = os.path.join(root, image_root)
+    metadata = _get_builtin_metadata("coco")
 
-    # Drop samples according to missing samples rate.
-    missing_samples_rate = cfg.DATALOADER.MISSING_SAMPLES_RATE
-    assert 0.0 <= missing_samples_rate < 1.0
-    new_dataset_size = int((1 - missing_samples_rate) * len(dataset))
-    indices = torch.randperm(len(dataset))[:new_dataset_size].tolist()
-    dataset = [dataset[i] for i in indices]
+    for seed in [1, 2, 3, 4, 5]:
+        name = f"coco_2017_train_labels_keep1_seed{seed}"
+        json_filename = f"instances_train2017.seed{seed}@labels_keep1.json"
+        json_file = os.path.join("coco/annotations/missing_labels", json_filename)
 
-    # Drop labels according to missing labels rate.
-    missing_labels_rate = cfg.DATALOADER.MISSING_LABELS_RATE
-    missing_empty_mode = cfg.DATALOADER.MISSING_LABELS_EMPTY_MODE
-    assert missing_empty_mode in ["keep_empty", "remove_empty", "keep_1_anno"]
-    dataset_filtered = []
-    for sample in dataset:
-        num_anno = len(sample["annotations"])
-        mask = torch.gt(torch.rand(num_anno), missing_labels_rate)
-        if mask.sum().item() == 0 and missing_empty_mode == "keep_1_anno":
-            idx = torch.randint(0, num_anno, ()).item()
-            mask[idx] = True
+        json_file = os.path.join(root, json_file)
 
-        sample["annotations"] = [
-            el for el, flag in zip(sample["annotations"], mask)
-            if flag
-        ]
-        if len(sample["annotations"]) > 0 or missing_empty_mode == "keep_empty":
-            dataset_filtered.append(sample)
-    dataset = dataset_filtered
+        register_coco_instances(name, metadata, json_file, image_root)
 
-    class_names = MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).thing_classes
-    print_instances_class_histogram(dataset, class_names)
+        for mode in ["labels", "samples"]:
+            for percent in [1, 2, 5, 10, 20]:
+                percent_labels = percent if mode == "labels" else 100
+                percent_samples = percent if mode == "samples" else 100
+                name = f"coco_2017_train_samples{percent_samples}_labels{percent_labels}_seed{seed}"
+                json_filename = f"instances_train2017.seed{seed}@samples{percent_samples}@labels{percent_labels}.json"
+                json_file = os.path.join("coco/annotations/missing_labels", json_filename)
 
-    mapper = DatasetMapper(cfg, True)
+                json_file = os.path.join(root, json_file)
 
-    sampler_name = cfg.DATALOADER.SAMPLER_TRAIN
-    logger = logging.getLogger("detectron2")
-    logger.log(logging.INFO, f"Training dataset contains {len(dataset)} samples after additional filtering.")
-    logger.log(logging.INFO, "Using training sampler {}".format(sampler_name))
-    if sampler_name == "TrainingSampler":
-        sampler = TrainingSampler(len(dataset))
-    elif sampler_name == "RepeatFactorTrainingSampler":
-        repeat_factors = RepeatFactorTrainingSampler.repeat_factors_from_category_frequency(
-            dataset, cfg.DATALOADER.REPEAT_THRESHOLD
-        )
-        sampler = RepeatFactorTrainingSampler(repeat_factors)
-    else:
-        raise ValueError("Unknown training sampler: {}".format(sampler_name))
-
-    return {
-        "dataset": dataset,
-        "sampler": sampler,
-        "mapper": mapper,
-        "total_batch_size": cfg.SOLVER.IMS_PER_BATCH,
-        "aspect_ratio_grouping": cfg.DATALOADER.ASPECT_RATIO_GROUPING,
-        "num_workers": cfg.DATALOADER.NUM_WORKERS,
-    }
-
-
-def add_missing_labels_cfg(cfg):
-    cfg.DATALOADER.MISSING_SAMPLES_RATE = 0.0
-    cfg.DATALOADER.MISSING_LABELS_RATE = 0.0
-    cfg.DATALOADER.MISSING_LABELS_EMPTY_MODE = "keep_empty"
+                register_coco_instances(name, metadata, json_file, image_root)
 
 
 def setup(args):
@@ -188,11 +143,12 @@ def setup(args):
     Create configs and perform basic setups.
     """
     cfg = get_cfg()
-    add_missing_labels_cfg(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     default_setup(cfg, args)
+
+    register_missing_labels_datasets()
     return cfg
 
 
